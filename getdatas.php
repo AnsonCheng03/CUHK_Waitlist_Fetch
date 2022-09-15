@@ -113,7 +113,7 @@ curl_setopt($ch, CURLOPT_HTTPHEADER, [
 ]);
 $verilist = array_merge(range('A', 'Z'), range('0', '9'));
 $vericount = 0;
-$outputdatas["ddl_subject"] = "CSCI";
+$outputdatas["ddl_subject"] = array_keys($courses)[0];
 do {
     $outputdatas["txt_captcha"] = $verilist[$vericount];
     $request = http_build_query($outputdatas);
@@ -125,23 +125,67 @@ do {
     else
         $vericount++;
 } while (strpos($response, 'Invalid Verification Code') !== false);
-$vericode = $verilist[$vericount-1];
+$vericode = $verilist[$vericount - 1];
+curl_close($ch);
+
 
 //Get All courses
+$mh = curl_multi_init();
+$curlarray = [];
 foreach ($courses as $coursecode => $coursename) {
+    $curlarray[$coursecode] = curl_init();
+    curl_setopt($curlarray[$coursecode], CURLOPT_URL, $host);
+    curl_setopt($curlarray[$coursecode], CURLOPT_CUSTOMREQUEST, 'POST');
+    curl_setopt($curlarray[$coursecode], CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($curlarray[$coursecode], CURLOPT_HTTPHEADER, [
+        'Host: rgsntl.rgs.cuhk.edu.hk',
+        'Cache-Control: max-age=0',
+        'Sec-Ch-Ua: "Chromium";v="105", "Not)A;Brand";v="8"',
+        'Sec-Ch-Ua-Mobile: ?0',
+        'Sec-Ch-Ua-Platform: "macOS"',
+        'Upgrade-Insecure-Requests: 1',
+        'Origin: https://rgsntl.rgs.cuhk.edu.hk',
+        'Content-Type: application/x-www-form-urlencoded',
+        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.5195.102 Safari/537.36',
+        'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+        'Sec-Fetch-Site: same-origin',
+        'Sec-Fetch-Mode: navigate',
+        'Sec-Fetch-User: ?1',
+        'Sec-Fetch-Dest: document',
+        'Referer: https://rgsntl.rgs.cuhk.edu.hk/aqs_prd_applx/Public/tt_dsp_crse_catalog.aspx',
+        'Accept-Encoding: gzip, deflate',
+        'Accept-Language: zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Cookie: PS_DEVICEFEATURES=maf:0 width:1728 height:1117 clientWidth:1200 clientHeight:871 pixelratio:2 touch:0 geolocation:1 websockets:1 webworkers:1 datepicker:1 dtpicker:1 timepicker:1 dnd:1 sessionstorage:1 localstorage:1 history:1 canvas:1 svg:1 postmessage:1 hc:0; ASP.NET_SessionId=' . $SESSIONID,
+    ]);
     $outputdatas["txt_captcha"] = $vericode;
     $outputdatas["ddl_subject"] = $coursecode;
     $request = http_build_query($outputdatas);
-    curl_setopt($ch, CURLOPT_POST, 1);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, $request);
-    $response = curl_exec($ch);
-    $tempcountcourse = substr_count($response, 'href');
-    if($tempcountcourse)
-        $coursecountbycode[$coursecode] = ($tempcountcourse + 1) / 2;
+    curl_setopt($curlarray[$coursecode], CURLOPT_POST, 1);
+    curl_setopt($curlarray[$coursecode], CURLOPT_POSTFIELDS, $request);
+    curl_multi_add_handle($mh, $curlarray[$coursecode]);
+
+    //if($coursecode >= "AIST") break;
 }
 
+$active = null;
+do {
+    $mrc = curl_multi_exec($mh, $active);
+} while ($mrc == CURLM_CALL_MULTI_PERFORM);
+
+while ($active && $mrc == CURLM_OK) {
+    if (curl_multi_select($mh) != -1) {
+        do {
+            $mrc = curl_multi_exec($mh, $active);
+        } while ($mrc == CURLM_CALL_MULTI_PERFORM);
+    }
+}
+
+foreach ($curlarray as $coursecode => $ch) {
+    $tempcountcourse = substr_count(curl_multi_getcontent($ch), 'normalGridViewRowStyle');
+    if ($tempcountcourse)
+        $coursecountbycode[$coursecode] = $tempcountcourse;
+    curl_multi_remove_handle($mh, $ch);
+}
+curl_multi_close($mh);
 
 print_r($coursecountbycode);
-
-
-curl_close($ch);
