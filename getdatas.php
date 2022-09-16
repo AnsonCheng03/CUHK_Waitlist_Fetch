@@ -57,14 +57,12 @@ foreach ((new DOMXPath($dom))->query('//option') as $html) {
 }
 
 //Get Verification Code Image
-foreach ((new DOMXPath($dom))->query('//img[contains(@id, "imgCaptcha")]') as $html) {
-    $imgcode = explode("?", $html->getAttribute('src'));
-}
-foreach (explode("&", $imgcode[1]) as $param) {
+$imgurl = explode("?", (new DOMXPath($dom))->evaluate('//img[@id="imgCaptcha"]')->item(0)->getAttribute('src'));
+foreach (explode("&", $imgurl[1]) as $param) {
     $imgparam[explode("=", $param)[0]] = explode("=", $param)[1];
 }
 $imgparam["len"] = 1;
-$veriaddr = $imgcode[0] . "?captchaname=" . $imgparam["captchaname"] . "&len=" . $imgparam["len"];
+$veriaddr = $imgurl[0] . "?captchaname=" . $imgparam["captchaname"] . "&len=" . $imgparam["len"];
 $ch = curl_init();
 curl_setopt($ch, CURLOPT_URL, dirname($host) . "/" . $veriaddr);
 curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'GET');
@@ -113,7 +111,7 @@ foreach ($courses as $subjectcode => $coursename) {
     curl_setopt($curlarray[$subjectcode], CURLOPT_POSTFIELDS, $request);
     curl_multi_add_handle($mh, $curlarray[$subjectcode]);
 
-    if ($subjectcode >= "ACCT") break;
+    //if ($subjectcode >= "ACPY") break;
 }
 
 $active = null;
@@ -131,7 +129,7 @@ while ($active && $mrc == CURLM_OK) {
 
 foreach ($curlarray as $subjectcode => $ch) {
     $html = curl_multi_getcontent($ch);
-    $tempcountcourse = substr_count($html, 'normalGridViewRowStyle');
+    $tempcountcourse = substr_count($html, 'normalGridViewRowStyle') + substr_count($html, 'normalGridViewAlternatingRowStyle');
     if ($tempcountcourse) {
         $coursecountbycode[$subjectcode] = $tempcountcourse;
         $dom = new DOMDocument();
@@ -139,10 +137,8 @@ foreach ($curlarray as $subjectcode => $ch) {
         $dom->loadHTML($html);
         foreach ((new DOMXPath($dom))->query('//input') as $html) {
             try {
-                //Save to Array
                 $courseinputbycode[$subjectcode][$html->getAttribute('name')] = $html->getAttribute('value');
-            } catch (Exception $e) {
-            }
+            } catch (Exception $e) { }
         }
         unset($courseinputbycode[$subjectcode]["btn_search"]);
         unset($courseinputbycode[$subjectcode]["btn_refresh"]);
@@ -157,8 +153,8 @@ curl_multi_close($mh);
 //Search check all course
 $mh = curl_multi_init();
 foreach ($coursecountbycode as $subjectcode => $totalcount) {
-    //for ($i=2; $i<=$totalcount ; $i++) {
-    for ($i = 2; $i <= 5; $i++) {
+    for ($i=2; $i<=$totalcount ; $i++) {
+    //for ($i = 2; $i <= 5; $i++) {
         $curlarray[$subjectcode][$i] = curl_init();
         curl_setopt($curlarray[$subjectcode][$i], CURLOPT_URL, $host);
         curl_setopt($curlarray[$subjectcode][$i], CURLOPT_CUSTOMREQUEST, 'POST');
@@ -186,23 +182,26 @@ while ($active && $mrc == CURLM_OK) {
 }
 
 foreach ($curlarray as $subjectcode => $course) {
-    foreach($course as $courseid => $ch)
+    foreach ($course as $courseid => $ch) {
         $html = curl_multi_getcontent($ch);
         $dom = new DOMDocument();
         libxml_use_internal_errors(true);
         $dom->loadHTML($html);
-        foreach ((new DOMXPath($dom))->query('//tr[contains(@class, "normalGridViewRowStyle")]') as $html) {
+        $coursehtml = new DOMXPath($dom);
+        foreach ($coursehtml->query('//tr[@class="normalGridViewRowStyle"]') as $tablerow) {
             try {
-                foreach($html->childNodes as $items) {
-                    echo "<pre>";
-                    var_dump($items);
-                    echo "</pre>";
-                    //print_r($items->getAttribute('id'));
+                $classstatussrc = $coursehtml->evaluate('.//img[contains(@id, "_img_status")]', $tablerow);
+                if ($classstatussrc->length > 0) {
+                    $coursename = $coursehtml->evaluate('//span[@id="uc_course_lbl_course"]')->item(0)->nodeValue;
+                    $classname = $coursehtml->evaluate('.//a[contains(@id, "_lkbtn_class_section")]', $tablerow)->item(0)->nodeValue;
+                    $classstatussrc = $coursehtml->evaluate('.//img[contains(@id, "_img_status")]', $tablerow)->item(0)->getAttribute('src');
+                    $classstatus =  strpos($classstatussrc, "open") !== false ? "Open" : (strpos($classstatussrc, "closed") !== false ? "Closed" : (strpos($classstatussrc, "wait") !== false ? "Waitlist" : "Error"));
+                    $coursedetails[$subjectcode][$coursename][$classname] = $classstatus;
                 }
-
-                
-            } catch (Exception $e) {}
+            } catch (Exception $e) { }
         }
+    }
 }
-
 curl_multi_close($mh);
+
+echo "<pre>".json_encode($coursedetails, JSON_PRETTY_PRINT)."</pre>";
