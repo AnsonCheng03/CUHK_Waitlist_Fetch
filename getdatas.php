@@ -15,7 +15,6 @@ $imgparam = [];
 $host = 'https://rgsntl.rgs.cuhk.edu.hk/aqs_prd_applx/Public/tt_dsp_crse_catalog.aspx';
 date_default_timezone_set('Asia/Hong_Kong');
 
-
 $html = file_get_contents($host, 0, stream_context_create(["http" => ["timeout" => 20]]));
 if ($html === false) die('fetch');
 
@@ -47,23 +46,6 @@ foreach ($matches[1] as $item) {
 }
 $SESSIONID = $cookies["ASP_NET_SessionId"];
 $browserheader = [
-    'Host: rgsntl.rgs.cuhk.edu.hk',
-    'Cache-Control: max-age=0',
-    'Sec-Ch-Ua: "Chromium";v="105", "Not)A;Brand";v="8"',
-    'Sec-Ch-Ua-Mobile: ?0',
-    'Sec-Ch-Ua-Platform: "macOS"',
-    'Upgrade-Insecure-Requests: 1',
-    'Origin: https://rgsntl.rgs.cuhk.edu.hk',
-    'Content-Type: application/x-www-form-urlencoded',
-    'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.5195.102 Safari/537.36',
-    'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-    'Sec-Fetch-Site: same-origin',
-    'Sec-Fetch-Mode: navigate',
-    'Sec-Fetch-User: ?1',
-    'Sec-Fetch-Dest: document',
-    'Referer: https://rgsntl.rgs.cuhk.edu.hk/aqs_prd_applx/Public/tt_dsp_crse_catalog.aspx',
-    'Accept-Encoding: gzip, deflate',
-    'Accept-Language: zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
     'Cookie: PS_DEVICEFEATURES=maf:0 width:1728 height:1117 clientWidth:1200 clientHeight:871 pixelratio:2 touch:0 geolocation:1 websockets:1 webworkers:1 datepicker:1 dtpicker:1 timepicker:1 dnd:1 sessionstorage:1 localstorage:1 history:1 canvas:1 svg:1 postmessage:1 hc:0; ASP.NET_SessionId=' . $SESSIONID,
 ];
 
@@ -115,23 +97,23 @@ $vericode = $verilist[$vericount - 1];
 curl_close($ch);
 
 
-//Get All courses
+//Get All courses by search
 $mh = curl_multi_init();
+$outputdatas["txt_captcha"] = $vericode;
 $curlarray = [];
-foreach ($courses as $coursecode => $coursename) {
-    $curlarray[$coursecode] = curl_init();
-    curl_setopt($curlarray[$coursecode], CURLOPT_URL, $host);
-    curl_setopt($curlarray[$coursecode], CURLOPT_CUSTOMREQUEST, 'POST');
-    curl_setopt($curlarray[$coursecode], CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($curlarray[$coursecode], CURLOPT_HTTPHEADER, $browserheader);
-    $outputdatas["txt_captcha"] = $vericode;
-    $outputdatas["ddl_subject"] = $coursecode;
+foreach ($courses as $subjectcode => $coursename) {
+    $curlarray[$subjectcode] = curl_init();
+    curl_setopt($curlarray[$subjectcode], CURLOPT_URL, $host);
+    curl_setopt($curlarray[$subjectcode], CURLOPT_CUSTOMREQUEST, 'POST');
+    curl_setopt($curlarray[$subjectcode], CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($curlarray[$subjectcode], CURLOPT_HTTPHEADER, $browserheader);
+    $outputdatas["ddl_subject"] = $subjectcode;
     $request = http_build_query($outputdatas);
-    curl_setopt($curlarray[$coursecode], CURLOPT_POST, 1);
-    curl_setopt($curlarray[$coursecode], CURLOPT_POSTFIELDS, $request);
-    curl_multi_add_handle($mh, $curlarray[$coursecode]);
+    curl_setopt($curlarray[$subjectcode], CURLOPT_POST, 1);
+    curl_setopt($curlarray[$subjectcode], CURLOPT_POSTFIELDS, $request);
+    curl_multi_add_handle($mh, $curlarray[$subjectcode]);
 
-    if($coursecode >= "AIST") break;
+    if ($subjectcode >= "ACCT") break;
 }
 
 $active = null;
@@ -147,12 +129,80 @@ while ($active && $mrc == CURLM_OK) {
     }
 }
 
-foreach ($curlarray as $coursecode => $ch) {
-    $tempcountcourse = substr_count(curl_multi_getcontent($ch), 'normalGridViewRowStyle');
-    if ($tempcountcourse)
-        $coursecountbycode[$coursecode] = $tempcountcourse;
+foreach ($curlarray as $subjectcode => $ch) {
+    $html = curl_multi_getcontent($ch);
+    $tempcountcourse = substr_count($html, 'normalGridViewRowStyle');
+    if ($tempcountcourse) {
+        $coursecountbycode[$subjectcode] = $tempcountcourse;
+        $dom = new DOMDocument();
+        libxml_use_internal_errors(true);
+        $dom->loadHTML($html);
+        foreach ((new DOMXPath($dom))->query('//input') as $html) {
+            try {
+                //Save to Array
+                $courseinputbycode[$subjectcode][$html->getAttribute('name')] = $html->getAttribute('value');
+            } catch (Exception $e) {
+            }
+        }
+        unset($courseinputbycode[$subjectcode]["btn_search"]);
+        unset($courseinputbycode[$subjectcode]["btn_refresh"]);
+        $courseinputbycode[$subjectcode]["__EVENTARGUMENT"] = '';
+        $courseinputbycode[$subjectcode]["ddl_subject"] = $subjectcode;
+    }
     curl_multi_remove_handle($mh, $ch);
 }
+unset($curlarray);
 curl_multi_close($mh);
 
-print_r($coursecountbycode);
+//Search check all course
+$mh = curl_multi_init();
+foreach ($coursecountbycode as $subjectcode => $totalcount) {
+    //for ($i=2; $i<=$totalcount ; $i++) {
+    for ($i = 2; $i <= 5; $i++) {
+        $curlarray[$subjectcode][$i] = curl_init();
+        curl_setopt($curlarray[$subjectcode][$i], CURLOPT_URL, $host);
+        curl_setopt($curlarray[$subjectcode][$i], CURLOPT_CUSTOMREQUEST, 'POST');
+        curl_setopt($curlarray[$subjectcode][$i], CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($curlarray[$subjectcode][$i], CURLOPT_HTTPHEADER, $browserheader);
+        $courseinputbycode[$subjectcode]["__EVENTTARGET"] = 'gv_detail$ctl' . sprintf('%02d', $i) . '$lbtn_course_nbr';
+        $request = http_build_query($courseinputbycode[$subjectcode]);
+        curl_setopt($curlarray[$subjectcode][$i], CURLOPT_POST, 1);
+        curl_setopt($curlarray[$subjectcode][$i], CURLOPT_POSTFIELDS, $request);
+        curl_multi_add_handle($mh, $curlarray[$subjectcode][$i]);
+    }
+}
+
+$active = null;
+do {
+    $mrc = curl_multi_exec($mh, $active);
+} while ($mrc == CURLM_CALL_MULTI_PERFORM);
+
+while ($active && $mrc == CURLM_OK) {
+    if (curl_multi_select($mh) != -1) {
+        do {
+            $mrc = curl_multi_exec($mh, $active);
+        } while ($mrc == CURLM_CALL_MULTI_PERFORM);
+    }
+}
+
+foreach ($curlarray as $subjectcode => $course) {
+    foreach($course as $courseid => $ch)
+        $html = curl_multi_getcontent($ch);
+        $dom = new DOMDocument();
+        libxml_use_internal_errors(true);
+        $dom->loadHTML($html);
+        foreach ((new DOMXPath($dom))->query('//tr[contains(@class, "normalGridViewRowStyle")]') as $html) {
+            try {
+                foreach($html->childNodes as $items) {
+                    echo "<pre>";
+                    var_dump($items);
+                    echo "</pre>";
+                    //print_r($items->getAttribute('id'));
+                }
+
+                
+            } catch (Exception $e) {}
+        }
+}
+
+curl_multi_close($mh);
